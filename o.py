@@ -355,11 +355,7 @@ class Line(UGenBase):
                 ArgSpec('dur', 1),
                 ArgSpec('doneAction', 0)]
 
-class XLine(UGenBase):
-    argspecs = [ArgSpec('start', 0),
-                ArgSpec('end', 1),
-                ArgSpec('dur', 1),
-                ArgSpec('doneAction', 0)]
+class XLine(Line): pass
 
 class Out(UGenBase):
     spec_class = OutSpec
