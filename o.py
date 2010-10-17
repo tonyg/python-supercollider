@@ -92,7 +92,7 @@ class ArgSpec(object):
                 raise Exception('no default value for argspec', self)
             spec.addConstantInput(self.defaultValue)
         elif type(value) == float or type(value) == int:
-            spec.addConstantInput(float(value))
+            spec.addConstantInput(value)
         else:
             spec.addUgenInput(value.realSpec(), value.outputNumber())
 
@@ -200,7 +200,7 @@ class UGenSpec(object):
         self.inputs = []
 
     def addConstantInput(self, f):
-        self.inputs.append(f)
+        self.inputs.append(float(f))
 
     def addUgenInput(self, u, outputIndex):
         self.inputs.append((u, outputIndex))
@@ -330,7 +330,7 @@ class UGenBase(object):
         specs = []
         for arglist in arglists:
             spec = cls.spec_class(cls.classname(), calcrate, special_index)
-            for i in range(len(arglist)):
+            for i in range(len(cls.argspecs)):
                 argspec = cls.argspecs[i]
                 arg = arglist[i] if i < len(arglist) else None
                 argspec.configure(spec, arg)
@@ -461,7 +461,7 @@ def m2():
     """
     sd = SynthDef("s", [('freqL', 1200), ('freqR', 1205)])
     c = sd.controls
-    sd.addUgen(Out.ar(0, SinOsc.ar(Line.ar(100, mc(c['freqL'], c['freqR'])), 0) * 0.2))
+    sd.addUgen(Out.ar(0, SinOsc.ar(Line.kr(100, mc(c['freqL'], c['freqR'])), 0) * 0.2))
     return sd
 
 def m3():
