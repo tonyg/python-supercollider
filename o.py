@@ -23,11 +23,9 @@ def bundle(*msgs):
         b.append(m)
     return b
 
-seconds1900To1970 = 2208988800L
 def timedBundle(timeTag, *msgs):
     b = bundle(*msgs)
-    # It's *local* time (ugh) and it's based on a 1900 epoch...
-    b.setTimeTag(timeTag + seconds1900To1970)
+    b.setTimeTag(timeTag)
     return b
 
 class AddAction:

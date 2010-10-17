@@ -529,6 +529,7 @@ class OSCMessage(object):
 		"""
 		return iter(self.tags())
 
+seconds1900To1970 = 2208988800L
 class OSCBundle(OSCMessage):
 	"""Builds a 'bundle' of OSC messages.
 	
@@ -551,7 +552,8 @@ class OSCBundle(OSCMessage):
 		The bundle's timetag can be set with the 'time' argument
 		"""
 		super(OSCBundle, self).__init__(address)
-		self.timetag = time
+		self.timetag = 0
+		self.setTimeTag(time)
 
 	def __str__(self):
 		"""Returns the Bundle's contents (and timetag, if nonzero) as a string.
@@ -573,12 +575,12 @@ class OSCBundle(OSCMessage):
 		In 'Python Time', that's floating seconds since the Epoch
 		"""
 		if time >= 0:
-			self.timetag = time
+			self.timetag = time + seconds1900To1970
 	
 	def getTimeTagStr(self):
 		"""Return the TimeTag as a human-readable string
 		"""
-		fract, secs = math.modf(self.timetag)
+		fract, secs = math.modf(self.timetag - seconds1900To1970)
 		out = time.ctime(secs)[11:19]
 		out += ("%.3f" % fract)[1:]
 		
