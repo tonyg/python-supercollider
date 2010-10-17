@@ -384,9 +384,28 @@ class Node(object):
         self.synthdef_name = synthdef_name
         if self.id is None:
             self.id = id_dispenser.next()
+        self.controls = {}
+
+    def set(self, *args):
+        for i in range(len(args) / 2):
+            self.controls[args[i*2]] = args[i*2+1]
+        return self
+
+    def inits(self, controlnamefilter = None):
+        inits = []
+        for (n, v) in self.controls.iteritems():
+            if controlnamefilter is None or n in controlnamefilter:
+                inits.append(n)
+                inits.append(float(v))
+        return inits
 
     def s_new(self, add_action = AddAction.GROUP_HEAD, add_target = 1):
-        return msg("/s_new", self.synthdef_name, self.id, add_action, add_target)
+        inits = self.inits()
+        return msg("/s_new", self.synthdef_name, self.id, add_action, add_target, *inits)
+
+    def n_set(self, controlnamefilter = None):
+        inits = self.inits(controlnamefilter)
+        return msg("/n_set", self.id, *inits)
 
     def n_free(self):
         return msg("/n_free", self.id)
@@ -469,6 +488,7 @@ def m3():
     c.sendto(m, (hostname, 57110))
 
     def send(msgOrBundle):
+        print 'sending', msgOrBundle
         c.sendto(msgOrBundle, (hostname, 57110))
 
     m = msg("/d_recv")
@@ -476,8 +496,42 @@ def m3():
     n = Node("s")
     m.append(n.s_new().getBinary(), 'b')
     send(m)
+    send(timedBundle(time.time() + 2.0, n.set("freqL", 400).n_set()))
     send(timedBundle(time.time() + 3.0, n.n_free()))
     s.serve_forever()
 
+def m4():
+    hostname = 'walk'
+
+    s = OSC.OSCServer((hostname, 14641))
+    s.addMsgHandler('default', s.msgPrinter_handler)
+    import threading
+    st = threading.Thread(target = s.serve_forever)
+    st.start()
+
+    m = OSC.OSCMessage("/status")
+    cl = s.client
+    cl.sendto(m, (hostname, 57110))
+
+    def send(msgOrBundle):
+        print 'sending', msgOrBundle
+        cl.sendto(msgOrBundle, (hostname, 57110))
+
+    sd = SynthDef("s", [('freqL', 1200), ('freqR', 1205)])
+    c = sd.controls
+    sd.addUgen(Out.ar(0, SinOsc.ar(mc(c['freqL'], c['freqR'])) * 0.2))
+
+    m = msg("/d_recv")
+    m.append(compileDefs([sd]), 'b')
+    n = Node("s")
+    m.append(timedBundle(time.time(), n.s_new()).getBinary(), 'b')
+    send(m)
+    send(timedBundle(time.time() + 1.0, n.set("freqL", 400).n_set()))
+    send(timedBundle(time.time() + 2.0, n.set("freqL", 550).n_set()))
+    send(timedBundle(time.time() + 3.0, n.n_free()))
+
 if __name__ == '__main__':
-    m3()
+    m4()
+    time.sleep(5)
+    import sys
+    sys.exit(0)
