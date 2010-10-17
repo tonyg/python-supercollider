@@ -75,11 +75,11 @@ def ef32(v): return struct.pack('>f', v)
 def estr(v): return struct.pack('>B', len(v)) + v
 
 def compileDefs(synthdefs):
-    for s in synthdefs: s.resolve()
     return flatten(['SCgf', # magic
-                    eu32(0), ## file version (always zero, for now,
-                             ## though version 1 has been seen in the wild!)
-                    eu16(len(synthdefs)), [s.compile() for s in synthdefs]])
+                    eu32(1), ## file version
+                    eu16(len(synthdefs)), [s.compile() for s in synthdefs],
+                    eu16(0) ## number of variants
+                    ])
 
 class ArgSpec(object):
     def __init__(self, name, defaultValue = None):
@@ -91,33 +91,60 @@ class ArgSpec(object):
             if self.defaultValue is None:
                 raise Exception('no default value for argspec', self)
             spec.addConstantInput(self.defaultValue)
-        elif type(value) == float:
-            spec.addConstantInput(value)
+        elif type(value) == float or type(value) == int:
+            spec.addConstantInput(float(value))
         else:
             spec.addUgenInput(value.realSpec(), value.outputNumber())
+
+class MultiChannel(object):
+    def __init__(self, specs):
+        self.specs = specs
+
+    def __getitem__(self, i):
+        return self.specs[i]
+
+    def __len__(self):
+        return len(self.specs)
+
+    def __neg__(self): return MultiChannel([-x for x in self.specs])
+    def __add__(self, other): return MultiChannel([x + other for x in self.specs])
+    def __sub__(self, other): return MultiChannel([x - other for x in self.specs])
+    def __mul__(self, other): return MultiChannel([x * other for x in self.specs])
+    def __div__(self, other): return MultiChannel([x / other for x in self.specs])
+    def __mod__(self, other): return MultiChannel([x % other for x in self.specs])
+
+def mc(*specs):
+    return MultiChannel(specs)
+
+def is_mc(x):
+    return type(x) == MultiChannel
 
 def expand_multichannel(args):
     maxlen = 1
     for arg in args:
-        if type(arg) == tuple:
+        if is_mc(arg):
             maxlen = max(maxlen, len(arg))
     result = []
     for i in range(maxlen):
         result.append([])
         for arg in args:
-            if type(arg) == tuple:
+            if is_mc(arg):
                 result[i].append(arg[i % len(arg)])
             else:
                 result[i].append(arg)
     return result
 
 class SynthDef(object):
-    def __init__(self, name):
+    def __init__(self, name, controldefs):
         self.name = name
         self.constants = {}
         self.parameters = []
         self.parameter_names = {}
+        self.pending_ugens = set()
         self.ugens = {}
+        for (name, init) in controldefs:
+            self.addParam(init, name)
+        self.controls = ControlSpec([d[0] for d in controldefs])
 
     def addConstant(self, floatVal):
         if floatVal not in self.constants:
@@ -132,14 +159,12 @@ class SynthDef(object):
 
     def addUgen(self, spec):
         if spec not in self.ugens:
+            if spec in self.pending_ugens:
+                return
+            self.pending_ugens.add(spec)
+            spec.resolve(self)
             self.ugens[spec] = len(self.ugens)
-
-    def resolve(self):
-        ## TODO: make resolution produce a depth-first serialization
-        ## of the ugen graph, as per the documentation. Apparently it
-        ## makes better use of buffers that way.
-        for u in self.ugens.keys():
-            u.resolve(self)
+            self.pending_ugens.remove(spec)
 
     def lookupConstant(self, floatVal):
         return self.constants[floatVal]
@@ -173,7 +198,6 @@ class UGenSpec(object):
         self.calcrate = calcrate
         self.special_index = special_index
         self.inputs = []
-        self.outputs = []
 
     def addConstantInput(self, f):
         self.inputs.append(f)
@@ -181,8 +205,8 @@ class UGenSpec(object):
     def addUgenInput(self, u, outputIndex):
         self.inputs.append((u, outputIndex))
 
-    def addOutput(self, rate):
-        self.outputs.append(rate)
+    def outputs(self):
+        return [self.calcrate]
 
     def resolve(self, synthDef):
         for i in self.inputs:
@@ -198,13 +222,14 @@ class UGenSpec(object):
             return eu16(synthDef.lookupUgen(i[0])) + eu16(i[1])
 
     def compile(self, synthDef):
+        outputs = self.outputs()
         return [estr(self.classname),
                 eu8(self.calcrate),
                 eu16(len(self.inputs)),
-                eu16(len(self.outputs)),
+                eu16(len(outputs)),
                 eu16(self.special_index),
                 [self.compileInput(i, synthDef) for i in self.inputs],
-                [eu8(o) for o in self.outputs]]
+                [eu8(o) for o in outputs]]
 
     def realSpec(self):
         return self
@@ -212,11 +237,63 @@ class UGenSpec(object):
     def outputNumber(self):
         return 0
 
+    def __neg__(self):
+        return UnaryOpUGen.construct(self.calcrate, UnOp.NEG, self)
+
     def __add__(self, other):
-        return BinOpUGen.construct(compute_rate(self, other), BinOp.PLUS, self, other)
+        return BinaryOpUGen.construct(compute_rate(self, other), BinOp.PLUS, self, other)
+
+    def __sub__(self, other):
+        return BinaryOpUGen.construct(compute_rate(self, other), BinOp.MINUS, self, other)
 
     def __mul__(self, other):
-        return BinOpUGen.construct(compute_rate(self, other), BinOp.TIMES, self, other)
+        return BinaryOpUGen.construct(compute_rate(self, other), BinOp.TIMES, self, other)
+
+    def __div__(self, other):
+        return BinaryOpUGen.construct(compute_rate(self, other), BinOp.DIVIDE, self, other)
+
+    def __mod__(self, other):
+        return BinaryOpUGen.construct(compute_rate(self, other), BinOp.MOD, self, other)
+
+class ControlSpec(UGenSpec):
+    def __init__(self, controlnames):
+        UGenSpec.__init__(self, 'Control', CalcRate.RATE_CONTROL)
+        self.controlnames = controlnames
+
+    def outputs(self):
+        return [self.calcrate for n in self.controlnames]
+
+    def controls(self):
+        if len(self.controlnames) == 1:
+            return self
+        else:
+            return [OutputProxy(self, i) for i in range(len(self.controlnames))]
+
+    def lookupControl(self, controlname):
+        return self.controlnames.index(controlname)
+
+    def __len__(self):
+        return len(self.controlnames)
+
+    def __getitem__(self, i):
+        if type(i) == int:
+            if len(self.controlnames) == 1:
+                return self
+            else:
+                return OutputProxy(self, i)
+        else:
+            return self[self.lookupControl(i)]
+
+class OutSpec(UGenSpec):
+    def outputs(self):
+        return []
+
+def compute_rate(a, b):
+    if a.calcrate == CalcRate.RATE_AUDIO: return CalcRate.RATE_AUDIO
+    if b.calcrate == CalcRate.RATE_AUDIO: return CalcRate.RATE_AUDIO
+    if a.calcrate == CalcRate.RATE_CONTROL: return CalcRate.RATE_CONTROL
+    if b.calcrate == CalcRate.RATE_CONTROL: return CalcRate.RATE_CONTROL
+    return CalcRate.RATE_SCALAR
 
 class UnOp:
     NEG = 0
@@ -229,10 +306,17 @@ class BinOp:
     MOD = 4
     MIN = 5
     MAX = 6
+    LOG = 25
+    LOG2 = 26
+    LOG10 = 27
 
 class UGenBase(object):
     special_index = 0
     spec_class = UGenSpec
+
+    @classmethod
+    def classname(cls):
+        return cls.__name__
 
     @classmethod
     def kr(cls, *args): return cls.construct(CalcRate.RATE_CONTROL, cls.special_index, *args)
@@ -245,7 +329,7 @@ class UGenBase(object):
         arglists = expand_multichannel(args)
         specs = []
         for arglist in arglists:
-            spec = cls.spec_class(cls.classname, calcrate, special_index)
+            spec = cls.spec_class(cls.classname(), calcrate, special_index)
             for i in range(len(arglist)):
                 argspec = cls.argspecs[i]
                 arg = arglist[i] if i < len(arglist) else None
@@ -254,7 +338,40 @@ class UGenBase(object):
         if len(specs) == 1:
             return specs[0]
         else:
-            return specs
+            return MultiChannel(specs)
+
+class BinaryOpUGen(UGenBase):
+    argspecs = [ArgSpec('left'),
+                ArgSpec('right')]
+
+class UnaryOpUGen(UGenBase):
+    argspecs = [ArgSpec('in')]
+
+class SinOsc(UGenBase):
+    argspecs = [ArgSpec('freq'),
+                ArgSpec('phase', 0)]
+
+class Line(UGenBase):
+    argspecs = [ArgSpec('start', 0),
+                ArgSpec('end', 1),
+                ArgSpec('dur', 1),
+                ArgSpec('doneAction', 0)]
+
+class XLine(UGenBase):
+    argspecs = [ArgSpec('start', 0),
+                ArgSpec('end', 1),
+                ArgSpec('dur', 1),
+                ArgSpec('doneAction', 0)]
+
+class Out(UGenBase):
+    spec_class = OutSpec
+    @classmethod
+    def construct(cls, calcrate, special_index, bus, channels):
+        spec = cls.spec_class(cls.classname(), calcrate, special_index)
+        ArgSpec('bus').configure(spec, bus)
+        for channel in channels:
+            ArgSpec('source').configure(spec, channel)
+        return spec
 
 class OutputProxy(object):
     def __init__(self, spec, index):
@@ -302,4 +419,71 @@ def main():
     s.serve_forever()
 
 def m2():
-    pass
+    """SynthDef.new("s", { arg freqL = 120, freqR = 125; Out.ar(0, SinOsc.ar([freqL, freqR], 0, 0.2))}).play()"""
+    """
+    53436766
+    00000001
+    0001
+      0173
+      0002
+        00000000
+        3e4ccccd
+      0002
+        42f00000
+        42fa0000
+      0002
+        05667265714c 0000
+        056672657152 0001
+      0006
+        07436f6e74726f6c Control
+          01 0000 0002 0000
+          01 01
+        0653696e4f7363 SinOsc
+          02 0002 0001 0000
+          0000 0000 ffff 0000
+          02
+        0c42696e6172794f705547656e BinaryOpUGen
+          02 0002 0001 0002
+          0001 0000 ffff 0001
+          02
+        0653696e4f7363 SinOsc
+          02 0002 0001 0000
+          0000 0001 ffff 0000
+          02
+        0c42696e6172794f705547656e
+          02 0002 0001 0002
+          0003 0000 ffff 0001
+          02
+        034f7574
+          02 0003 0000 0000
+          ffff 0000 0002 0000 0004 0000
+      0000
+    """
+    sd = SynthDef("s", [('freqL', 1200), ('freqR', 1205)])
+    c = sd.controls
+    sd.addUgen(Out.ar(0, SinOsc.ar(Line.ar(100, mc(c['freqL'], c['freqR'])), 0) * 0.2))
+    return sd
+
+def m3():
+    hostname = 'walk'
+
+    s = OSC.OSCServer((hostname, 14641))
+    s.addMsgHandler('default', s.msgPrinter_handler)
+
+    m = OSC.OSCMessage("/status")
+    c = s.client
+    c.sendto(m, (hostname, 57110))
+
+    def send(msgOrBundle):
+        c.sendto(msgOrBundle, (hostname, 57110))
+
+    m = msg("/d_recv")
+    m.append(compileDefs([m2()]), 'b')
+    n = Node("s")
+    m.append(n.s_new().getBinary(), 'b')
+    send(m)
+    send(timedBundle(time.time() + 3.0, n.n_free()))
+    s.serve_forever()
+
+if __name__ == '__main__':
+    m3()
