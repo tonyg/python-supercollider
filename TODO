@@ -1,0 +1,10 @@
+done Load samples
+done Playback samples
+done Pitch-shift (by resampling) samples
+Low-pass filters
+Control ramping
+Envelopes
+Triggering
+Sequencing
+
+while True: d = random.sample(glob.glob('*.wav'),1)[0]; os.system("play -q %s trim 00:00 00:00.3" % (d,)); time.sleep(0.05)

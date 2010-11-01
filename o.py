@@ -3,6 +3,8 @@ import supercollider.osc as osc
 from supercollider import SynthDef, mc
 from supercollider.ugen import *
 from supercollider.oscutil import *
+import supercollider.buf as buf
+import os
 
 def m2():
     """SynthDef.new("s", { arg freqL = 120, freqR = 125; Out.ar(0, SinOsc.ar([freqL, freqR], 0, 0.2))}).play()"""
@@ -88,6 +90,7 @@ def m4():
 
     def send(msgOrBundle):
         print 'sending', msgOrBundle
+        print 'as hex', msgOrBundle.getBinary().encode('hex')
         cl.sendto(msgOrBundle, (hostname, 57110))
 
     sd = SynthDef("s", [('freqL', 1200), ('freqR', 1205)])
@@ -98,10 +101,28 @@ def m4():
     m.append(supercollider.compileDefs([sd]), 'b')
     n = supercollider.node.Node("s")
     m.append(delayedBundle(0.01, n.s_new()).getBinary(), 'b')
+    #send(m)
+    #send(delayedBundle(1.0, n.set("freqL", 400).n_set()))
+    #send(delayedBundle(2.0, n.set("freqL", 550).n_set()))
+    #send(delayedBundle(3.0, n.n_free()))
+
+    sd = SynthDef("b0", [])
+    c = sd.controls
+    pb = PlayBuf.ar(0, BufRateScale.kr(0), 1, 0, 0, 2)
+    sd.addUgen(Out.ar(0, mc(pb, pb)))
+    #sd.addUgen(Out.ar(0, SinOsc.ar(110) * 0.2))
+    n = supercollider.node.Node("b0")
+
+    m = msg("/d_recv")
+    m.append(supercollider.compileDefs([sd]), 'b')
+    m.append(buf.allocRead(0,
+                           os.path.abspath("scratch/sound/VOXX_L2S_Project_SnareDrum06_Steal_WorldMax_14x6_mono.wav")
+                           #os.path.abspath("scratch/sound/VOXX_L2S_Project_Crash_Cymbal_Istambul_Mehmed_16_stereo.wav")
+                           ).getBinary(), 'b')
     send(m)
-    send(delayedBundle(1.0, n.set("freqL", 400).n_set()))
-    send(delayedBundle(2.0, n.set("freqL", 550).n_set()))
-    send(delayedBundle(3.0, n.n_free()))
+    time.sleep(1)
+    send(n.s_new())
+    send(delayedBundle(7.0, n.n_free()))
 
 if __name__ == '__main__':
     m4()

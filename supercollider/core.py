@@ -277,9 +277,9 @@ class UnaryOpUGen(UGenBase):
 
 def compute_rate(a, b):
     if a.calcrate == CalcRate.RATE_AUDIO: return CalcRate.RATE_AUDIO
-    if b.calcrate == CalcRate.RATE_AUDIO: return CalcRate.RATE_AUDIO
+    if hasattr(b, 'calcrate') and b.calcrate == CalcRate.RATE_AUDIO: return CalcRate.RATE_AUDIO
     if a.calcrate == CalcRate.RATE_CONTROL: return CalcRate.RATE_CONTROL
-    if b.calcrate == CalcRate.RATE_CONTROL: return CalcRate.RATE_CONTROL
+    if hasattr(b, 'calcrate') and b.calcrate == CalcRate.RATE_CONTROL: return CalcRate.RATE_CONTROL
     return CalcRate.RATE_SCALAR
 
 class OutputProxy(object):
