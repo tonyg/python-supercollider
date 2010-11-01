@@ -1,6 +1,4 @@
-done Load samples
-done Playback samples
-done Pitch-shift (by resampling) samples
+Make PlayBuf support stereo
 Low-pass filters
 Control ramping
 Envelopes
