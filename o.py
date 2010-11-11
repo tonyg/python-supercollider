@@ -53,7 +53,7 @@ def m2():
     return sd
 
 def m3():
-    hostname = 'walk'
+    hostname = 'localhost'
 
     s = osc.OSCServer((hostname, 14641))
     s.addMsgHandler('default', s.msgPrinter_handler)
@@ -76,7 +76,7 @@ def m3():
     s.serve_forever()
 
 def m4():
-    hostname = 'walk'
+    hostname = 'localhost'
 
     s = osc.OSCServer((hostname, 14641))
     s.addMsgHandler('default', s.msgPrinter_handler)
